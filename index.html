@@ -228,6 +228,9 @@ footer .tag{color:var(--off);font-family:'Hanken Grotesk',sans-serif;font-size:1
 <script>
   // Cole aqui a URL (termina em /exec) do Web App do Google Apps Script que grava a planilha e salva os anexos no Drive. Vazio = não envia.
   const SHEETS_WEBHOOK_URL = "https://script.google.com/macros/s/AKfycbwBXu37ytyguP5f-WGVz7o89hpBlgD6W33b2gT4vFpCUMG6l0ap0Kcv80Bfu4Rd6qkD7Q/exec";
+  // HUB da Globalcast: grava a resposta e os documentos e cria a pasta em SRV\EM TRAMITAÇÃO.
+  // Enquanto SHEETS_WEBHOOK_URL estiver preenchida, o envio vai também para a planilha (reserva).
+  const HUB_URL = (/(^|\.)hubmaximum\.globalauditoria\.com\.br$|\.lovable\.app$|^localhost$/.test(location.hostname) ? '' : 'https://hubmaximum.globalauditoria.com.br') + '/api/public/abertura/enviar';
   const WHATSAPP_NUMBER = "551131592313";
   const DOCS_EMAILS = "rafael.martins@globalauditoria.com.br,victor@globalauditoria.com.br";
 
@@ -302,14 +305,19 @@ footer .tag{color:var(--off);font-family:'Hanken Grotesk',sans-serif;font-size:1
     const LABELS={anexo_comprovante_endereco:'Comprovante de endereço',anexo_rg_cnh:'RG e CNH',anexo_iptu:'IPTU (capa e contra capa)',anexo_outros:'Outros documentos'};
 
     // envia os dados e os anexos para a planilha e para a pasta do Drive
-    if(SHEETS_WEBHOOK_URL){
+    if(HUB_URL || SHEETS_WEBHOOK_URL){
       const btn=form.querySelector('button[type=submit]'); btn.disabled=true;
       try{
         status(Object.keys(FILES).length?'Enviando os dados e os documentos… não feche esta página.':'Enviando…');
         const arquivos=await prepararArquivos(FILES);
-        const r=await fetch(SHEETS_WEBHOOK_URL,{method:'POST',body:JSON.stringify({campos:d,arquivos}),headers:{'Content-Type':'text/plain;charset=utf-8'}});
-        const j=await r.json();
-        if(!j.ok) throw new Error(j.erro||'O envio não foi concluído.');
+        const corpo=JSON.stringify({campos:d,arquivos});
+        const enviar=async(url,tipo)=>{const r=await fetch(url,{method:'POST',body:corpo,headers:{'Content-Type':tipo}});const j=await r.json().catch(()=>({}));if(!j.ok) throw new Error(j.erro||'O envio não foi concluído.');return j;};
+        // HUB e planilha ao mesmo tempo; basta um dos dois confirmar.
+        const envios=[];
+        if(HUB_URL) envios.push(enviar(HUB_URL,'application/json'));
+        if(SHEETS_WEBHOOK_URL) envios.push(enviar(SHEETS_WEBHOOK_URL,'text/plain;charset=utf-8'));
+        const res=await Promise.allSettled(envios);
+        if(!res.some(x=>x.status==='fulfilled')){const e=res.find(x=>x.status==='rejected');throw (e&&e.reason)||new Error('O envio não foi concluído.');}
       }catch(err){
         status((err&&err.message&&!/fetch|network|json/i.test(err.message)?err.message+' ':'')+'Não conseguimos confirmar o envio. Confira sua conexão e tente de novo. Se continuar, fale com a gente pelo WhatsApp.',true);
         btn.disabled=false; return;}
